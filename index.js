@@ -7,7 +7,8 @@ require('dotenv').config()
 
 app.use(cors())
 app.use(express.static('public'))
-  app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.urlencoded({ extended: true }));
+
 app.use(bodyParser.json());
 
 app.get('/', (req, res) => {
@@ -17,7 +18,10 @@ app.get('/', (req, res) => {
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-});
+  })
+.then(() => console.log('MongoDB connected successfully'))
+.catch(err => console.error('MongoDB connection error:', err));
+
 
 
 const userSchema = new mongoose.Schema({
@@ -59,6 +63,11 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
 
     let date = req.body.date ? new Date(req.body.date) : new Date();
+    // Ensure the date is valid
+    if (isNaN(date.getTime())) date = new Date();
+    
+    // Normalize the date to start of day to avoid timezone issues
+    date.setHours(0, 0, 0, 0);
 
     const newExercise = new Exercise({
       userId: user._id,
@@ -73,7 +82,7 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
       username: user.username,
       description: savedExercise.description,
       duration: savedExercise.duration,
-      date: savedExercise.date.toDateString(),
+        date: savedExercise.date.toDateString(),// Force conversion to Date first
       _id: user._id
     });
   } catch (err) {
@@ -89,16 +98,23 @@ app.get("/api/users/:_id/logs", async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
 
     let filter = { userId: user._id };
+
     if (from || to) {
       filter.date = {};
       if (from) filter.date.$gte = new Date(from);
       if (to) filter.date.$lte = new Date(to);
     }
 
-    let exercises = Exercise.find(filter);
-    if (limit) exercises = exercises.limit(parseInt(limit));
+    let exercisesQuery = Exercise.find(filter);
 
-    const logs = await exercises.exec();
+    if (limit) exercisesQuery = exercisesQuery.limit(parseInt(limit));
+
+    const logs = await exercisesQuery.exec();
+
+    // DEBUG: Check what the dates look like
+    console.log('Raw dates from database:', logs.map(ex => ex.date));
+    console.log('Formatted dates:', logs.map(ex => ex.date.toDateString()));
+    console.log('Type of formatted dates:', logs.map(ex => typeof ex.date.toDateString()));
 
     res.json({
       username: user.username,
@@ -107,14 +123,13 @@ app.get("/api/users/:_id/logs", async (req, res) => {
       log: logs.map(ex => ({
         description: ex.description,
         duration: ex.duration,
-        date: ex.date.toDateString()
+        date: new Date(ex.date).toDateString()
       }))
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 const listener = app.listen(process.env.PORT || 3000, () => {
   console.log('Your app is listening on port ' + listener.address().port)
